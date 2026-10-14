@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from pathlib import Path
 
 
@@ -17,56 +18,67 @@ st.set_page_config(
 
 
 # ============================================================
-# 2. CUSTOM CSS
+# 2. CUSTOM STYLE
 # ============================================================
 
 st.markdown("""
 <style>
 
-    .main {
-        background-color: #F7F9FC;
-    }
+.block-container {
+    padding-top: 1.8rem;
+    padding-bottom: 2rem;
+    max-width: 1450px;
+}
 
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-        max-width: 1400px;
-    }
+h1 {
+    color: #174A75;
+    font-weight: 750;
+}
 
-    h1 {
-        color: #17365D;
-        font-weight: 750;
-    }
+h2, h3 {
+    color: #24476B;
+}
 
-    h2, h3 {
-        color: #203B59;
-    }
+[data-testid="stMetric"] {
+    background: #F5F9FD;
+    border: 1px solid #DCE7F1;
+    border-radius: 12px;
+    padding: 18px;
+}
 
-    [data-testid="stMetric"] {
-        background-color: white;
-        border: 1px solid #E1E8F0;
-        border-radius: 12px;
-        padding: 20px;
-    }
+[data-testid="stMetricValue"] {
+    color: #1565A8;
+}
 
-    [data-testid="stMetricValue"] {
-        color: #1768AC;
-    }
+[data-testid="stSidebar"] {
+    background-color: #F5F8FC;
+}
 
-    .section-description {
-        color: #64748B;
-        font-size: 15px;
-    }
+.insight-box {
+    background-color: #F4F7FB;
+    border-left: 4px solid #2478B7;
+    padding: 15px 20px;
+    border-radius: 6px;
+    margin-top: 12px;
+    margin-bottom: 18px;
+}
+
+.subtitle {
+    color: #64748B;
+    font-size: 16px;
+}
 
 </style>
 """, unsafe_allow_html=True)
 
 
 # ============================================================
-# 3. LOAD DATA
+# 3. DATA LOADING
 # ============================================================
 
-DATA_PATH = Path(__file__).resolve().parent / "sz_2017.csv"
+BASE_DIR = Path(__file__).resolve().parent
+
+DATA_PATH = BASE_DIR / "sz_2017.csv"
 
 REQUIRED_COLUMNS = [
     "lineid_o",
@@ -81,36 +93,38 @@ REQUIRED_COLUMNS = [
 
 
 @st.cache_data
-def load_data(file_path):
+def load_data(path):
 
-    df = pd.read_csv(file_path)
+    df = pd.read_csv(path)
 
     df.columns = df.columns.str.strip()
 
-    missing_columns = [
+    missing = [
         col for col in REQUIRED_COLUMNS
         if col not in df.columns
     ]
 
-    if missing_columns:
+    if missing:
         raise ValueError(
-            f"Missing columns: {missing_columns}"
+            f"Missing required columns: {missing}"
         )
 
     df = df[REQUIRED_COLUMNS].copy()
 
-    # Convert numerical columns
     df["count"] = pd.to_numeric(
-        df["count"], errors="coerce"
+        df["count"],
+        errors="coerce"
     )
 
     df["d_time"] = pd.to_numeric(
-        df["d_time"], errors="coerce"
+        df["d_time"],
+        errors="coerce"
     )
 
-    # Remove invalid records
     df = df.dropna(
         subset=[
+            "lineid_o",
+            "lineid_d",
             "stationname_o",
             "stationname_d",
             "count",
@@ -119,11 +133,15 @@ def load_data(file_path):
     )
 
     df = df[
-        (df["count"] > 0) &
+        (df["count"] > 0)
+        &
         (df["d_time"] >= 0)
     ].copy()
 
-    # Ensure station and line labels are strings
+    df["weighted_time"] = (
+        df["count"] * df["d_time"]
+    )
+
     for col in [
         "lineid_o",
         "lineid_d",
@@ -134,9 +152,17 @@ def load_data(file_path):
     ]:
         df[col] = df[col].astype(str).str.strip()
 
-    # Weighted travel-time contribution
-    df["weighted_time"] = (
-        df["d_time"] * df["count"]
+    # Use line and station ID together to distinguish stations.
+    df["origin_key"] = (
+        df["lineid_o"]
+        + " | "
+        + df["stationid_o"]
+    )
+
+    df["destination_key"] = (
+        df["lineid_d"]
+        + " | "
+        + df["stationid_d"]
     )
 
     return df
@@ -145,57 +171,37 @@ def load_data(file_path):
 if not DATA_PATH.exists():
 
     st.error(
-        "Data file not found. "
-        "Please upload sz_2017.csv to the same "
-        "GitHub folder as app.py."
+        "CSV file not found. "
+        "Please place sz_2017.csv in the same "
+        "GitHub directory as app.py."
     )
 
     st.stop()
 
 
 try:
+
     df = load_data(DATA_PATH)
 
-except Exception as e:
+except Exception as error:
 
-    st.error(f"Error loading dataset: {e}")
+    st.error(
+        f"Unable to load dataset: {error}"
+    )
 
     st.stop()
 
 
 if df.empty:
-    st.error("The dataset contains no valid passenger records.")
+
+    st.error("No valid records were found.")
+
     st.stop()
 
 
 # ============================================================
-# 4. HEADER
+# 4. SESSION STATE
 # ============================================================
-
-st.title("🚇 Shenzhen Metro Intelligence")
-
-st.markdown(
-    """
-    **Passenger Demand & Network Insights**
-
-    An interactive dashboard for metro planning managers
-    to identify high-demand stations, understand passenger
-    travel patterns, and prioritize operational reviews.
-    """
-)
-
-st.divider()
-
-
-# ============================================================
-# 5. SIDEBAR FILTERS
-# ============================================================
-
-st.sidebar.title("🎛️ Dashboard Controls")
-
-st.sidebar.markdown(
-    "Explore passenger demand across the Shenzhen metro network."
-)
 
 origin_lines = sorted(
     df["lineid_o"].unique().tolist()
@@ -205,74 +211,218 @@ destination_lines = sorted(
     df["lineid_d"].unique().tolist()
 )
 
-selected_origin_lines = st.sidebar.multiselect(
-    "Origin Metro Lines",
-    options=origin_lines,
-    default=origin_lines
+max_duration = max(
+    1,
+    int(df["d_time"].max())
 )
 
-selected_destination_lines = st.sidebar.multiselect(
-    "Destination Metro Lines",
-    options=destination_lines,
-    default=destination_lines
+DEFAULT_FILTERS = {
+    "origin_filter": "All Lines",
+    "destination_filter": "All Lines",
+    "duration_filter": (0, max_duration),
+    "top_n_filter": 10
+}
+
+
+for key, value in DEFAULT_FILTERS.items():
+
+    if key not in st.session_state:
+        st.session_state[key] = value
+
+
+def reset_filters():
+
+    for key, value in DEFAULT_FILTERS.items():
+        st.session_state[key] = value
+
+
+# ============================================================
+# 5. HEADER
+# ============================================================
+
+st.title("🚇 Shenzhen Metro Intelligence")
+
+st.markdown(
+    """
+    <div class="subtitle">
+    Passenger Demand, Travel Patterns & Operational Priorities
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
-top_n = st.sidebar.slider(
-    "Number of stations / routes",
+st.markdown(
+    """
+    **Decision Maker:** Metro Planning & Operations Manager
+
+    **Business Question:** Where should metro operators
+    prioritize further capacity reviews and passenger-flow
+    investigations?
+    """
+)
+
+st.divider()
+
+
+# ============================================================
+# 6. SIDEBAR CONTROLS
+# ============================================================
+
+st.sidebar.title("🎛️ Dashboard Controls")
+
+st.sidebar.markdown(
+    "Use the filters below to explore metro travel demand."
+)
+
+
+st.sidebar.selectbox(
+    "🚉 Origin Metro Line",
+    options=["All Lines"] + origin_lines,
+    key="origin_filter"
+)
+
+
+st.sidebar.selectbox(
+    "🏁 Destination Metro Line",
+    options=["All Lines"] + destination_lines,
+    key="destination_filter"
+)
+
+
+st.sidebar.slider(
+    "⏱️ Journey Duration (minutes)",
+    min_value=0,
+    max_value=max_duration,
+    step=1,
+    key="duration_filter"
+)
+
+
+st.sidebar.slider(
+    "📊 Number of Stations / Routes",
     min_value=5,
     max_value=20,
-    value=10
+    step=1,
+    key="top_n_filter"
 )
 
-# Apply filters
-filtered_df = df[
-    df["lineid_o"].isin(selected_origin_lines)
-    &
-    df["lineid_d"].isin(selected_destination_lines)
-].copy()
+
+st.sidebar.button(
+    "🔄 Reset All Filters",
+    on_click=reset_filters,
+    use_container_width=True
+)
+
+
+# ============================================================
+# 7. APPLY FILTERS
+# ============================================================
+
+filtered_df = df.copy()
+
+selected_origin = st.session_state["origin_filter"]
+
+selected_destination = st.session_state["destination_filter"]
+
+selected_duration = st.session_state["duration_filter"]
+
+top_n = st.session_state["top_n_filter"]
+
+
+if selected_origin != "All Lines":
+
+    filtered_df = filtered_df[
+        filtered_df["lineid_o"] == selected_origin
+    ]
+
+
+if selected_destination != "All Lines":
+
+    filtered_df = filtered_df[
+        filtered_df["lineid_d"] == selected_destination
+    ]
+
+
+filtered_df = filtered_df[
+    filtered_df["d_time"].between(
+        selected_duration[0],
+        selected_duration[1]
+    )
+]
 
 
 if filtered_df.empty:
 
     st.warning(
-        "No passenger records match the selected filters."
+        "No journeys match these filters. "
+        "Please change your selection."
     )
 
     st.stop()
 
 
+# ============================================================
+# 8. FILTER IMPACT
+# ============================================================
+
+original_trips = df["count"].sum()
+
+filtered_trips = filtered_df["count"].sum()
+
+retained_share = (
+    filtered_trips / original_trips * 100
+)
+
+
 st.sidebar.divider()
 
-st.sidebar.markdown(
-    """
-    **Dataset Information**
+st.sidebar.subheader("📈 Filter Impact")
 
-    - City: Shenzhen, China
-    - Dataset: Metro smart-card journey records
-    - Period: October 2017
-    - Source: Navi-Complexity research dataset
+st.sidebar.metric(
+    "Selected Passenger Journeys",
+    f"{filtered_trips:,.0f}"
+)
 
-    **Important:** This dataset contains aggregated
-    journeys, not individual daily timestamps.
-    """
+st.sidebar.progress(
+    min(1.0, float(retained_share / 100))
+)
+
+st.sidebar.caption(
+    f"{retained_share:.1f}% of recorded journeys retained"
+)
+
+st.sidebar.markdown("**Current Selection**")
+
+st.sidebar.write(
+    f"Origin: {selected_origin}"
+)
+
+st.sidebar.write(
+    f"Destination: {selected_destination}"
+)
+
+st.sidebar.write(
+    f"Duration: {selected_duration[0]}–"
+    f"{selected_duration[1]} min"
 )
 
 
 # ============================================================
-# 6. KPI CALCULATIONS
+# 9. KPI CALCULATIONS
 # ============================================================
 
 total_trips = filtered_df["count"].sum()
 
-avg_travel_time = (
+average_duration = (
     filtered_df["weighted_time"].sum()
     / total_trips
 )
 
+
 origin_flow = (
     filtered_df
     .groupby(
-        "stationname_o",
+        ["origin_key", "stationname_o"],
         as_index=False
     )["count"]
     .sum()
@@ -281,11 +431,12 @@ origin_flow = (
         ascending=False
     )
 )
+
 
 destination_flow = (
     filtered_df
     .groupby(
-        "stationname_d",
+        ["destination_key", "stationname_d"],
         as_index=False
     )["count"]
     .sum()
@@ -295,56 +446,66 @@ destination_flow = (
     )
 )
 
-busiest_station = origin_flow.iloc[0]["stationname_o"]
 
-busiest_station_trips = origin_flow.iloc[0]["count"]
+busiest_origin = origin_flow.iloc[0]
 
-busiest_station_share = (
-    busiest_station_trips / total_trips * 100
+busiest_origin_name = (
+    busiest_origin["stationname_o"]
+)
+
+busiest_origin_trips = (
+    busiest_origin["count"]
+)
+
+busiest_origin_share = (
+    busiest_origin_trips
+    / total_trips
+    * 100
 )
 
 
 # ============================================================
-# 7. KPI DISPLAY
+# 10. KPI DISPLAY
 # ============================================================
 
 st.subheader("📊 Network Overview")
 
-col1, col2, col3 = st.columns(3)
+kpi1, kpi2, kpi3 = st.columns(3)
 
-with col1:
+
+with kpi1:
 
     st.metric(
-        label="Total Passenger Journeys",
-        value=f"{total_trips:,.0f}"
+        "Passenger Journeys",
+        f"{total_trips:,.0f}"
     )
 
     st.caption(
-        "Total recorded journeys in the selected data."
+        "Total journeys matching the selected filters"
     )
 
 
-with col2:
+with kpi2:
 
     st.metric(
-        label="Average Journey Time",
-        value=f"{avg_travel_time:.1f} min"
+        "Average Journey Duration",
+        f"{average_duration:.1f} min"
     )
 
     st.caption(
-        "Weighted by the number of passenger journeys."
+        "Passenger-weighted average travel time"
     )
 
 
-with col3:
+with kpi3:
 
     st.metric(
-        label="Busiest Origin Share",
-        value=f"{busiest_station_share:.1f}%"
+        "Busiest Origin Share",
+        f"{busiest_origin_share:.1f}%"
     )
 
     st.caption(
-        f"Highest origin demand: {busiest_station}"
+        f"Highest origin demand: {busiest_origin_name}"
     )
 
 
@@ -352,65 +513,119 @@ st.divider()
 
 
 # ============================================================
-# 8. CHART 1
-# STATION PASSENGER DEMAND
+# 11. STATION FLOW ANALYSIS
 # ============================================================
 
 st.subheader(
-    "01 | Which Stations Carry the Greatest Passenger Demand?"
+    "01 | Where Is Passenger Demand Most Concentrated?"
 )
 
 st.markdown(
     """
-    This chart compares origin and destination passenger
-    volumes at the busiest stations.
+    Compare origin and destination passenger demand
+    across major metro stations.
 
-    **Management decision:** Identify stations that should
-    receive priority for capacity reviews and field inspections.
+    **Decision supported:** Identify stations that may
+    require priority capacity assessments.
     """
 )
 
 
-# Calculate station-level total flows
 origin_station = (
     filtered_df
-    .groupby("stationname_o")["count"]
+    .groupby(
+        ["origin_key", "stationname_o"],
+        as_index=False
+    )["count"]
     .sum()
-    .rename("Origin Trips")
+    .rename(
+        columns={
+            "origin_key": "station_key",
+            "stationname_o": "Station",
+            "count": "Origin Trips"
+        }
+    )
 )
+
 
 destination_station = (
     filtered_df
-    .groupby("stationname_d")["count"]
+    .groupby(
+        ["destination_key", "stationname_d"],
+        as_index=False
+    )["count"]
     .sum()
-    .rename("Destination Trips")
+    .rename(
+        columns={
+            "destination_key": "station_key",
+            "stationname_d": "Station",
+            "count": "Destination Trips"
+        }
+    )
 )
 
-station_flow = pd.concat(
-    [origin_station, destination_station],
-    axis=1
-).fillna(0)
+
+station_flow = pd.merge(
+    origin_station,
+    destination_station,
+    on="station_key",
+    how="outer",
+    suffixes=("_origin", "_destination")
+)
+
+station_flow["Station"] = (
+    station_flow["Station_origin"]
+    .fillna(station_flow["Station_destination"])
+)
+
+station_flow = station_flow[
+    [
+        "station_key",
+        "Station",
+        "Origin Trips",
+        "Destination Trips"
+    ]
+].copy()
+
+station_flow[
+    ["Origin Trips", "Destination Trips"]
+] = station_flow[
+    ["Origin Trips", "Destination Trips"]
+].fillna(0)
 
 station_flow["Total Endpoint Activity"] = (
     station_flow["Origin Trips"]
     + station_flow["Destination Trips"]
 )
 
-station_flow = (
-    station_flow
-    .sort_values(
-        "Total Endpoint Activity",
-        ascending=False
+station_flow["Imbalance (%)"] = (
+    abs(
+        station_flow["Origin Trips"]
+        - station_flow["Destination Trips"]
     )
-    .head(top_n)
-    .reset_index()
-    .rename(
-        columns={"index": "Station"}
-    )
+    / station_flow["Total Endpoint Activity"]
+    * 100
 )
 
-station_long = station_flow.melt(
-    id_vars=["Station"],
+# Distinguish stations with the same name but different keys.
+station_flow["Station Label"] = (
+    station_flow["Station"]
+    + " ("
+    + station_flow["station_key"]
+    + ")"
+)
+
+station_flow = station_flow.sort_values(
+    "Total Endpoint Activity",
+    ascending=False
+)
+
+
+top_stations = station_flow.head(top_n).copy()
+
+
+station_long = top_stations.melt(
+    id_vars=["Station Label"],
     value_vars=[
         "Origin Trips",
         "Destination Trips"
@@ -421,62 +636,43 @@ station_long = station_flow.melt(
 
 
 fig_station = px.bar(
-
     station_long,
-
     x="Passenger Journeys",
-
-    y="Station",
-
+    y="Station Label",
     color="Flow Type",
-
     orientation="h",
-
     barmode="group",
-
     color_discrete_map={
-        "Origin Trips": "#2878B5",
+        "Origin Trips": "#2374AB",
         "Destination Trips": "#20BFA9"
     },
-
     title="Passenger Demand at Major Metro Stations",
-
     labels={
-        "Passenger Journeys": "Passenger Journeys",
-        "Station": "Metro Station"
-    },
-
-    hover_data={
-        "Passenger Journeys": ":,.0f"
+        "Station Label": "Metro Station"
     }
-
 )
 
+
 fig_station.update_layout(
-
     template="plotly_white",
-
-    height=max(450, top_n * 40),
-
+    height=max(450, top_n * 45),
     legend_title_text="Passenger Flow",
-
+    hovermode="closest",
     margin=dict(
-        l=20,
-        r=20,
+        l=10,
+        r=10,
         t=60,
-        b=20
-    ),
-
-    font=dict(
-        size=13
+        b=10
     )
-
 )
 
 fig_station.update_yaxes(
     categoryorder="array",
-    categoryarray=station_flow["Station"].iloc[::-1].tolist()
+    categoryarray=top_stations[
+        "Station Label"
+    ].iloc[::-1].tolist()
 )
+
 
 st.plotly_chart(
     fig_station,
@@ -484,37 +680,34 @@ st.plotly_chart(
 )
 
 
-# Station imbalance calculation
-station_flow["Flow Imbalance (%)"] = (
-    abs(
-        station_flow["Origin Trips"]
-        - station_flow["Destination Trips"]
-    )
-    /
-    station_flow["Total Endpoint Activity"].replace(0, float("nan"))
-    * 100
-)
-
-station_flow["Flow Imbalance (%)"] = (
-    station_flow["Flow Imbalance (%)"].fillna(0)
-)
+# ------------------------------------------------------------
+# Station insight
+# ------------------------------------------------------------
 
 most_imbalanced = (
-    station_flow
+    top_stations
     .sort_values(
-        "Flow Imbalance (%)",
+        "Imbalance (%)",
         ascending=False
     )
     .iloc[0]
 )
 
-st.info(
-    f"🔎 **Operational insight:** Among the displayed stations, "
-    f"**{most_imbalanced['Station']}** has the largest "
-    f"relative origin–destination imbalance "
-    f"({most_imbalanced['Flow Imbalance (%)']:.1f}%). "
-    f"This may warrant further investigation, but the "
-    f"aggregated data cannot establish the cause."
+
+st.markdown(
+    f"""
+    <div class="insight-box">
+    <b>Operational Insight</b><br>
+    Among the displayed stations,
+    <b>{most_imbalanced['Station']}</b>
+    has the highest relative imbalance between
+    origin and destination journeys
+    ({most_imbalanced['Imbalance (%)']:.1f}%).
+    This is a useful candidate for further investigation,
+    although it does not by itself indicate congestion.
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
 
@@ -522,32 +715,30 @@ st.divider()
 
 
 # ============================================================
-# 9. CHART 2
-# MOST IMPORTANT OD CORRIDORS
+# 12. OD CORRIDOR ANALYSIS
 # ============================================================
 
 st.subheader(
-    "02 | Which Travel Corridors Dominate Passenger Demand?"
+    "02 | Which Travel Corridors Carry the Most Journeys?"
 )
 
 st.markdown(
     """
-    Not all station-to-station journeys attract equal demand.
+    Identify the highest-demand origin–destination
+    station pairs.
 
-    This chart highlights the most frequently used
-    origin–destination (OD) pairs.
-
-    **Management decision:** Identify major travel corridors
-    that deserve further capacity and service reviews.
+    **Decision supported:** Determine which travel
+    corridors deserve further operational review.
     """
 )
 
 
-# Aggregate OD journeys
 od_flow = (
     filtered_df
     .groupby(
         [
+            "origin_key",
+            "destination_key",
             "stationname_o",
             "stationname_d"
         ],
@@ -559,17 +750,28 @@ od_flow = (
     )
 )
 
+
 od_flow["Average Journey Time"] = (
     od_flow["Weighted_Time"]
-    /
-    od_flow["Passenger_Journeys"]
+    / od_flow["Passenger_Journeys"]
 )
+
 
 od_flow["Route"] = (
     od_flow["stationname_o"]
     + " → "
     + od_flow["stationname_d"]
 )
+
+od_flow["Route Label"] = (
+    od_flow["Route"]
+    + " ("
+    + od_flow["origin_key"]
+    + " → "
+    + od_flow["destination_key"]
+    + ")"
+)
+
 
 top_routes = (
     od_flow
@@ -582,73 +784,71 @@ top_routes = (
 )
 
 
-fig_routes = px.bar(
-
+fig_od = px.bar(
     top_routes,
-
     x="Passenger_Journeys",
-
-    y="Route",
-
+    y="Route Label",
     color="Average Journey Time",
-
     orientation="h",
-
     color_continuous_scale=[
         "#20BFA9",
         "#2878B5",
         "#F2A541"
     ],
-
-    title="Highest-Demand Origin–Destination Corridors",
-
+    title="Highest-Demand Origin–Destination Pairs",
     labels={
         "Passenger_Journeys": "Passenger Journeys",
-        "Route": "Origin → Destination",
-        "Average Journey Time": "Avg. Time (min)"
+        "Route Label": "Origin → Destination",
+        "Average Journey Time": "Average Time (min)"
     },
-
     hover_data={
         "Passenger_Journeys": ":,.0f",
         "Average Journey Time": ":.1f"
     }
-
 )
 
-fig_routes.update_layout(
 
+fig_od.update_layout(
     template="plotly_white",
-
     height=max(450, top_n * 45),
-
     margin=dict(
-        l=20,
-        r=20,
+        l=10,
+        r=10,
         t=60,
-        b=20
+        b=10
     )
-
 )
 
-fig_routes.update_yaxes(
+fig_od.update_yaxes(
     categoryorder="total ascending"
 )
 
+
 st.plotly_chart(
-    fig_routes,
+    fig_od,
     use_container_width=True
 )
 
 
 top_route = top_routes.iloc[0]
 
-st.info(
-    f"🔎 **Operational insight:** The highest-demand "
-    f"directional OD pair is "
-    f"**{top_route['Route']}**, representing "
-    f"**{top_route['Passenger_Journeys']:,.0f} journeys**, "
-    f"with a weighted average journey time of "
-    f"**{top_route['Average Journey Time']:.1f} minutes**."
+
+st.markdown(
+    f"""
+    <div class="insight-box">
+    <b>Operational Insight</b><br>
+    The highest-demand directional OD pair is
+    <b>{top_route['Route']}</b>,
+    accounting for
+    <b>{top_route['Passenger_Journeys']:,.0f}</b>
+    recorded journeys.
+    Its weighted average journey duration is
+    <b>{top_route['Average Journey Time']:.1f} minutes</b>.
+    This suggests a useful corridor for capacity review,
+    not proof that trains along the route are overcrowded.
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
 
@@ -656,70 +856,199 @@ st.divider()
 
 
 # ============================================================
-# 10. MANAGEMENT PRIORITIES
+# 13. JOURNEY DURATION ANALYSIS
 # ============================================================
 
-st.subheader("🎯 Management Action Priorities")
+st.subheader(
+    "03 | How Are Passenger Journey Times Distributed?"
+)
 
 st.markdown(
     """
-    Based on the selected passenger demand records,
-    the following areas deserve further operational attention.
+    Examine the distribution of journey durations.
+
+    Unlike a conventional histogram that counts CSV rows,
+    this chart weights each journey duration by the
+    actual number of passenger trips.
     """
 )
 
-priority_col1, priority_col2 = st.columns(2)
+
+duration_bins = [0, 10, 20, 30, 45, 60, 90, float("inf")]
+
+duration_labels = [
+    "0–10",
+    "10–20",
+    "20–30",
+    "30–45",
+    "45–60",
+    "60–90",
+    "90+"
+]
 
 
-with priority_col1:
+duration_df = filtered_df.copy()
+
+duration_df["Duration Group"] = pd.cut(
+    duration_df["d_time"],
+    bins=duration_bins,
+    labels=duration_labels,
+    right=False
+)
+
+
+duration_summary = (
+    duration_df
+    .groupby(
+        "Duration Group",
+        observed=False
+    )["count"]
+    .sum()
+    .reset_index()
+)
+
+duration_summary["Share (%)"] = (
+    duration_summary["count"]
+    / total_trips
+    * 100
+)
+
+
+fig_duration = px.bar(
+    duration_summary,
+    x="Duration Group",
+    y="Share (%)",
+    color="Share (%)",
+    color_continuous_scale=[
+        "#20BFA9",
+        "#2374AB",
+        "#F2A541"
+    ],
+    text="Share (%)",
+    title="Distribution of Passenger Journey Durations",
+    labels={
+        "Duration Group": "Journey Duration (minutes)",
+        "Share (%)": "Share of Passenger Journeys (%)"
+    }
+)
+
+
+fig_duration.update_traces(
+    texttemplate="%{text:.1f}%",
+    textposition="outside"
+)
+
+fig_duration.update_layout(
+    template="plotly_white",
+    height=420,
+    coloraxis_showscale=False,
+    margin=dict(
+        l=10,
+        r=10,
+        t=60,
+        b=10
+    )
+)
+
+
+st.plotly_chart(
+    fig_duration,
+    use_container_width=True
+)
+
+
+dominant_duration = (
+    duration_summary
+    .sort_values(
+        "count",
+        ascending=False
+    )
+    .iloc[0]
+)
+
+
+st.caption(
+    f"The largest duration category is "
+    f"{dominant_duration['Duration Group']} minutes, "
+    f"representing "
+    f"{dominant_duration['Share (%)']:.1f}% "
+    f"of selected journeys."
+)
+
+
+st.divider()
+
+
+# ============================================================
+# 14. MANAGEMENT PRIORITIES
+# ============================================================
+
+st.subheader("🎯 Management Priorities")
+
+st.markdown(
+    """
+    The following recommendations are automatically
+    updated according to your selected filters.
+    """
+)
+
+
+col_left, col_right = st.columns(2)
+
+
+with col_left:
 
     st.markdown("#### 🚉 Priority Station")
 
-    st.success(
+    st.markdown(
         f"""
-        **{busiest_station}**
+        **{busiest_origin_name}**
 
         Recorded origin journeys:
-        **{busiest_station_trips:,.0f}**
+        **{busiest_origin_trips:,.0f}**
 
-        Suggested action:
-        Review station capacity, passenger circulation,
-        and platform operations.
+        Share of selected journeys:
+        **{busiest_origin_share:.1f}%**
+
+        **Suggested action**
+
+        Prioritize a station-level review of
+        passenger circulation and platform capacity.
         """
     )
 
 
-with priority_col2:
+with col_right:
 
-    st.markdown("#### 🚆 Priority Travel Corridor")
+    st.markdown("#### 🚆 Priority OD Corridor")
 
-    st.warning(
+    st.markdown(
         f"""
         **{top_route['Route']}**
 
         Recorded journeys:
         **{top_route['Passenger_Journeys']:,.0f}**
 
-        Suggested action:
-        Investigate demand concentration and
-        consider whether further service-capacity
-        analysis is required.
+        Average journey time:
+        **{top_route['Average Journey Time']:.1f} min**
+
+        **Suggested action**
+
+        Review demand concentration and investigate
+        whether available service capacity matches
+        observed travel demand.
         """
     )
 
 
-# ============================================================
-# 11. DOWNLOAD DATA
-# ============================================================
-
 st.divider()
 
-st.subheader("📥 Download Analysis Results")
 
-st.markdown(
-    "Download aggregated station and OD statistics "
-    "for further analysis."
-)
+# ============================================================
+# 15. DATA DOWNLOAD
+# ============================================================
+
+st.subheader("📥 Download Analysis Results")
 
 download_col1, download_col2 = st.columns(2)
 
@@ -731,10 +1060,11 @@ with download_col1:
     ).encode("utf-8-sig")
 
     st.download_button(
-        label="Download Station Statistics",
+        "Download Station Statistics",
         data=station_csv,
-        file_name="station_statistics.csv",
-        mime="text/csv"
+        file_name="station_analysis.csv",
+        mime="text/csv",
+        use_container_width=True
     )
 
 
@@ -745,79 +1075,82 @@ with download_col2:
     ).encode("utf-8-sig")
 
     st.download_button(
-        label="Download OD Statistics",
+        "Download OD Statistics",
         data=od_csv,
-        file_name="od_statistics.csv",
-        mime="text/csv"
+        file_name="od_analysis.csv",
+        mime="text/csv",
+        use_container_width=True
     )
 
 
 # ============================================================
-# 12. DATA LIMITATIONS
+# 16. DATA LIMITATIONS
 # ============================================================
 
 st.divider()
 
-with st.expander("📚 Data Source & Limitations"):
+with st.expander("📚 Dataset Information & Limitations"):
 
     st.markdown(
         """
-        **Source**
+        ### Data Source
 
-        Shenzhen metro smart-card data from the
-        Navi-Complexity research repository.
+        Shenzhen metro smart-card journey data.
+
+        Source repository:
 
         https://github.com/Jzjsnow/navi-complexity
 
-        **Data period**
+        ### Data Coverage
 
-        October 2017.
+        - City: Shenzhen, China
+        - Period: October 2017
+        - Unit: Aggregated OD journeys
+        - Main variables: Origin, destination,
+          journey duration, and passenger count
 
-        **Unit of analysis**
+        ### Important Limitations
 
-        Aggregated journeys by origin station,
-        destination station, and journey duration.
+        **1. No individual journey timestamps**
 
-        **Important limitations**
+        The dataset cannot support hourly or
+        daily passenger-flow analysis.
 
-        1. The dataset does not contain individual
-           departure timestamps.
+        **2. Demand is not the same as congestion**
 
-        2. Daily and hourly passenger patterns
-           cannot be reconstructed.
+        A station with many journeys is not
+        necessarily overcrowded.
 
-        3. High passenger demand does not necessarily
-           indicate congestion or inadequate capacity.
+        **3. OD demand does not equal train load**
 
-        4. OD passenger counts represent observed
-           journeys rather than physical train loads
-           on individual track segments.
+        An OD pair represents travel between
+        two stations, not direct passenger counts
+        on individual track segments.
 
-        5. The dashboard supports prioritization
-           of further investigation rather than
-           immediate service-change decisions.
+        **4. Historical data**
 
-        **Refresh frequency**
+        The dataset represents historical travel
+        demand rather than current operating conditions.
 
-        In a real operational setting, journey records
-        should ideally be refreshed daily.
+        ### Recommended Refresh Frequency
 
-        Because this project uses a historical
-        research dataset, the current dashboard
-        is a static analysis rather than
-        a real-time monitoring system.
+        In a real operational environment,
+        daily updates would help managers monitor
+        changing travel demand.
+
+        This historical dataset is static.
         """
     )
 
 
 # ============================================================
-# 13. FOOTER
+# 17. FOOTER
 # ============================================================
 
 st.divider()
 
 st.caption(
     "Shenzhen Metro Intelligence | "
-    "BANA409 Data App Project | "
-    "Built with Python, Pandas, Plotly and Streamlit"
+    "BANA409 Data App | "
+    "Python · Pandas · Plotly · Streamlit"
 )
